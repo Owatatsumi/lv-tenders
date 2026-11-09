@@ -8,12 +8,14 @@ export type Tender = {
   customer_name: string | null;
   deadline: string | null;
   url: string;
+  description: string | null;
   ai_summary: string | null;
   created_at: string;
 };
 
-export type TenderInsert = Omit<Tender, "id" | "created_at" | "customer_name" | "deadline" | "ai_summary"> &
-  Partial<Pick<Tender, "id" | "created_at" | "customer_name" | "deadline" | "ai_summary">>;
+type OptionalOnInsert = "id" | "created_at" | "customer_name" | "deadline" | "description" | "ai_summary";
+
+export type TenderInsert = Omit<Tender, OptionalOnInsert> & Partial<Pick<Tender, OptionalOnInsert>>;
 
 export type Database = {
   public: {
