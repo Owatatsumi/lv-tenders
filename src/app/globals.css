@@ -140,16 +140,16 @@
 }
 
 /*
- * Рифлёность (scanlines): 1px бледной линии каждые 3px. Цвет берётся из --scanline,
- * поэтому текстура сама подстраивается под светлую и тёмную тему.
+ * Рифлёность (scanlines): 3px бледной линии каждые 9px (×3 к исходным 1px / 3px).
+ * Цвет берётся из --scanline, поэтому текстура сама подстраивается под светлую и тёмную тему.
  */
 @utility scanlines {
   background-image: repeating-linear-gradient(
     to bottom,
     transparent 0,
-    transparent 2px,
-    var(--scanline) 2px,
-    var(--scanline) 3px
+    transparent 6px,
+    var(--scanline) 6px,
+    var(--scanline) 9px
   );
 }
 

@@ -53,15 +53,25 @@ function TenderGridSkeleton() {
   );
 }
 
+const BLOB = "absolute rounded-full blur-[120px]";
+const BLUE = "bg-primary/25 dark:bg-primary/30";
+const ORANGE = "bg-orange-accent/20 dark:bg-orange-accent/25";
+
 /**
- * Мягкое свечение в верхних углах: два размытых пятна под контентом.
- * `isolate` у обёртки страницы держит z-[-10] над фоном body (с текстурой), но под контентом.
+ * Свечение по всей высоте страницы: 6 размытых пятен, чередуются Electric Blue / Cantaloupe Orange
+ * и левый / правый край. Слой растянут на всю обёртку (inset-0) и обрезан (overflow-hidden),
+ * pointer-events-none — не перехватывает клики по карточкам.
+ * `isolate` у обёртки держит z-[-10] над фоном body (с текстурой), но под контентом.
  */
 function BackgroundGlow() {
   return (
-    <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-[-10] h-[44rem] overflow-hidden">
-      <div className="absolute -top-48 -left-40 size-[34rem] rounded-full bg-primary/25 blur-[120px] dark:bg-primary/30" />
-      <div className="absolute -top-32 -right-48 size-[30rem] rounded-full bg-orange-accent/20 blur-[120px] dark:bg-orange-accent/25" />
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-[-10] overflow-hidden">
+      <div className={`${BLOB} ${BLUE} top-[-10%] left-[-10%] size-[34rem]`} />
+      <div className={`${BLOB} ${ORANGE} top-[6%] right-[-12%] size-[30rem]`} />
+      <div className={`${BLOB} ${ORANGE} top-[28%] left-[-14%] size-[28rem]`} />
+      <div className={`${BLOB} ${BLUE} top-[46%] right-[-8%] size-[32rem]`} />
+      <div className={`${BLOB} ${BLUE} top-[66%] left-[-8%] size-[30rem]`} />
+      <div className={`${BLOB} ${ORANGE} bottom-[-5%] right-[-5%] size-[34rem]`} />
     </div>
   );
 }
@@ -69,7 +79,9 @@ function BackgroundGlow() {
 export default function Home() {
   return (
     <LocaleProvider>
-      <div className="relative isolate flex flex-1 flex-col">
+      {/* overflow-clip, а не overflow-hidden: так же обрезает пятна (без горизонтального скролла),
+          но не создаёт область прокрутки — иначе перестанет работать sticky-шапка */}
+      <div className="relative isolate flex flex-1 flex-col overflow-clip">
         <BackgroundGlow />
         <SiteHeader />
         <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
