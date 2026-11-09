@@ -29,9 +29,30 @@ export async function proxy(request: NextRequest) {
   );
 
   // Не вставлять код между созданием клиента и getClaims(): это и есть обновление сессии.
-  await supabase.auth.getClaims();
+  const { data } = await supabase.auth.getClaims();
+
+  // getClaims проверяет только подпись токена — он валиден до истечения срока (по умолчанию 1 час),
+  // даже если пользователя уже удалили или сессию отозвали. Поэтому для залогиненных сверяемся
+  // с Supabase Auth и, если пользователя/сессии больше нет, удаляем cookies ещё до рендера страницы.
+  if (data?.claims) {
+    const { error } = await supabase.auth.getUser();
+    if (error && isGoneSession(error)) {
+      await supabase.auth.signOut({ scope: "local" }); // чистит auth-cookies через setAll выше
+    }
+  }
 
   return response;
+}
+
+/** Пользователь удалён / сессия отозвана. Сетевые и 5xx-ошибки сюда не относятся — сессию не трогаем. */
+function isGoneSession(error: { code?: string; status?: number }) {
+  return (
+    error.code === "user_not_found" ||
+    error.code === "session_not_found" ||
+    error.code === "bad_jwt" ||
+    error.status === 401 ||
+    error.status === 403
+  );
 }
 
 export const config = {

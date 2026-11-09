@@ -1,4 +1,5 @@
 import { unstable_rethrow } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { SearchBar, SearchBarSkeleton } from "@/components/search-bar";
 import { SearchProvider } from "@/components/search-provider";
@@ -13,6 +14,10 @@ import { parseQuery, searchTenders } from "@/lib/tenders";
  * Читает ?q=… и сессию из cookies — гостю текст сводок не отправляется (paywall на сервере).
  */
 async function TenderGrid({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
+  // Список персональный (сессия) и всегда свежий — рендерим только во время запроса.
+  // Без этого Next.js пытается пререндерить блок, а клиент Supabase проверяет срок токена
+  // через Date.now() → ошибка «unstable value Date.now() while prerendering» у авторизованных.
+  await connection();
   const { q } = await searchParams;
   const query = parseQuery(typeof q === "string" ? q : "").join(" ");
 

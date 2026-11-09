@@ -24,7 +24,9 @@ export function AuthStatus() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    // getUser() сверяется с Supabase Auth (а не просто читает cookie): удалённый пользователь
+    // или отозванная сессия не покажутся в шапке как «вошёл».
+    supabase.auth.getUser().then(({ data, error }) => setUser(error ? null : data.user));
     const { data } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
     return () => data.subscription.unsubscribe();
   }, []);
