@@ -1,7 +1,8 @@
 /**
  * AI-выжимка тендеров: берёт из `tenders` записи с ai_summary IS NULL,
  * открывает страницу закупки на eis.gov.lv, отправляет её текст в Claude
- * и сохраняет выжимку из 3 пунктов (на латышском) обратно в базу.
+ * и сохраняет выжимку из 3 пунктов на трёх языках в ai_summary (jsonb):
+ *   {"lv": "• Būtība: …\n• …", "ru": "• Суть: …\n• …", "en": "• Summary: …\n• …"}
  *
  * Запуск: npm run summarize
  * Требует в .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY
@@ -13,46 +14,91 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { createClient } from "@supabase/supabase-js";
 import { chromium, type Browser } from "playwright";
 import { z } from "zod";
-import type { Database, Tender } from "../lib/database.types";
+import { LOCALES, type AiSummary, type Database, type Locale, type Tender } from "../lib/database.types";
 
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 
 const MODEL = process.env.SUMMARY_MODEL ?? "claude-haiku-5-5";
 const MAX_PAGE_CHARS = 12_000;
 
-/** Жёсткий лимит на пункт: ~1–2 коротких предложения. Длиннее — один повторный запрос. */
-const MAX_POINT_CHARS = 220;
+/**
+ * Жёсткий лимит на пункт: ~1–2 коротких предложения. Длиннее — один повторный запрос.
+ * Русский текст в среднем длиннее латышского/английского, поэтому лимит чуть выше.
+ */
+const MAX_POINT_CHARS: Record<Locale, number> = { lv: 220, ru: 250, en: 220 };
 
-const SummarySchema = z.object({
-  butiba: z.string().describe("Kas tiek iepirkts un kam. 1 īss teikums."),
-  budzets_un_termini: z
+/** Подписи пунктов: модель пишет только текст, подписи добавляет код — они всегда одинаковые. */
+const LABELS: Record<Locale, [string, string, string]> = {
+  lv: ["Būtība", "Budžets un termiņi", "Prasības pretendentam"],
+  ru: ["Суть", "Бюджет и сроки", "Требования к участнику"],
+  en: ["Summary", "Budget and deadlines", "Bidder requirements"],
+};
+
+const PointsSchema = z.object({
+  essence: z.string().describe("What is being procured and for whom. 1 short sentence."),
+  budget: z
     .string()
-    .describe("Paredzamā līgumcena, iesniegšanas termiņš (datums un laiks), izpildes laiks. 1–2 īsi teikumi."),
-  prasibas: z
-    .string()
-    .describe("Svarīgākās prasības vai nosacījumi pretendentam. 1–2 īsi teikumi."),
+    .describe("Estimated contract value, submission deadline (date and time), contract duration. 1–2 short sentences."),
+  requirements: z.string().describe("Key requirements or conditions for bidders. 1–2 short sentences."),
 });
+type Points = z.infer<typeof PointsSchema>;
+
+/** Ответ модели: строго JSON-объект с тремя языками (гарантируется structured outputs). */
+const SummarySchema = z.object({ lv: PointsSchema, ru: PointsSchema, en: PointsSchema });
 type Summary = z.infer<typeof SummarySchema>;
 
-const SYSTEM_PROMPT = `Tu esi asistents Latvijas mazajiem uzņēmumiem, kas seko publiskajiem iepirkumiem.
-No iepirkuma datiem sagatavo ļoti īsu kopsavilkumu latviešu valodā trīs punktos:
-1) būtība, 2) budžets un termiņi, 3) galvenās prasības pretendentam.
+const SYSTEM_PROMPT = `You help small businesses in Latvia follow public procurements.
+From the procurement data, write a very short summary in THREE languages: Latvian (lv), Russian (ru), English (en).
+Each language has the same three points with the same facts:
+1) essence, 2) budget and deadlines, 3) key requirements for bidders.
 
-Stingri noteikumi par apjomu:
-- Katrs punkts: MAKSIMĀLI 1–2 īsi teikumi, ne vairāk kā ${MAX_POINT_CHARS} rakstzīmes.
-- Raksti tikai to, kas palīdz uzņēmumam izlemt, vai piedalīties. Bez ievadfrāzēm.
-- Neatkārto nosaukumu, pasūtītāja reģistrācijas numuru, CPV kodus, iepirkuma identifikācijas numuru un procedūras veidu.
-- Budžetā: kopsumma ar valūtu (piem., 233 000 EUR); daļas tikai tad, ja to ir 2–3. Termiņš formātā 24.11.2026 plkst. 09:00.
+Output: only a JSON object {"lv": {...}, "ru": {...}, "en": {...}} matching the schema — no markdown, no code fences, no extra text.
 
-Saturs:
-- Izmanto tikai sniegtos datus. Neizdomā summas, datumus vai prasības.
-- Ja informācijas nav, raksti "Nav norādīts".
-- Ja konkrētu prasību lapā nav, raksti vienu teikumu: "Prasības — nolikumā (EIS dokumenti)." un, ja ir, vienu svarīgu nosacījumu (piem., vērtēšanas kritērijs vai objekta apsekošana).`;
+Strict length rules:
+- Each point: AT MOST 1–2 short sentences (≤ ${MAX_POINT_CHARS.lv} characters; Russian ≤ ${MAX_POINT_CHARS.ru}).
+- Only what helps a company decide whether to bid. No introductions.
+- Do not repeat the title, the customer's registration number, CPV codes, the procurement ID or the procedure type.
+- Budget: total with currency (e.g. 233 000 EUR); list lots only if there are 2–3.
+- Deadline format: lv "24.11.2026 plkst. 09:00", ru "24.11.2026 в 09:00", en "24.11.2026 at 09:00".
 
-function tooLong(s: Summary): string[] {
-  return Object.entries(s)
-    .filter(([, text]) => text.trim().length > MAX_POINT_CHARS)
-    .map(([key, text]) => `${key} (${text.trim().length})`);
+Content rules:
+- Use only the provided data. Never invent amounts, dates or requirements.
+- If information is missing, write: lv "Nav norādīts", ru "Не указано", en "Not specified".
+- If the page has no concrete bidder requirements, write one sentence — lv "Prasības — nolikumā (EIS dokumenti).",
+  ru "Требования — в положении о закупке (документы EIS).", en "Requirements are in the tender regulations (EIS documents)." —
+  plus, if present, one important condition (e.g. award criterion or mandatory site visit).
+- Names of organizations, companies, places and brands: copy them EXACTLY as written in the source, in Latin script,
+  in all three languages (e.g. "Jūrmalas ūdens" SIA, Iecava, Rēzeknes slimnīca). Never transliterate them into Cyrillic
+  and never mix Latin and Cyrillic letters in one word. Translate everything else naturally.`;
+
+/**
+ * Слово, в котором смешаны латиница и кириллица («удens», «Иecavской») — признак испорченного имени.
+ * Допустимы аббревиатуры через дефис: «IoT-платформы», «ERP-систему».
+ */
+const MIXED_SCRIPT_WORD = /[\p{Script=Latin}][\p{Script=Cyrillic}]|[\p{Script=Cyrillic}][\p{Script=Latin}]/u;
+
+/** Проблемы, из-за которых стоит один раз переспросить модель. */
+function findProblems(s: Summary): string[] {
+  return LOCALES.flatMap((locale) =>
+    Object.entries(s[locale]).flatMap(([key, text]) => {
+      const problems: string[] = [];
+      const len = text.trim().length;
+      if (len > MAX_POINT_CHARS[locale]) problems.push(`${locale}.${key}: too long (${len} chars)`);
+      const mixed = text.split(/[\s,.;:()«»"„“]+/).filter((w) => MIXED_SCRIPT_WORD.test(w));
+      if (mixed.length > 0) {
+        problems.push(`${locale}.${key}: mixed Latin/Cyrillic in ${mixed.join(", ")} — copy names exactly from the source`);
+      }
+      return problems;
+    }),
+  );
+}
+
+/** «175000.00 EUR» → «175 000 EUR», «7965,50 EUR» → «7 965,50 EUR» (детерминированно, не полагаемся на модель). */
+function formatAmounts(text: string): string {
+  return text.replace(/\b(\d{4,})(?:[.,](\d{2}))?(\s?)(EUR|€)/g, (_, int: string, cents: string | undefined, _sp, cur: string) => {
+    const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    return `${grouped}${cents && cents !== "00" ? `,${cents}` : ""} ${cur}`;
+  });
 }
 
 function env(name: string): string {
@@ -61,12 +107,17 @@ function env(name: string): string {
   return value;
 }
 
-function formatSummary(s: Summary): string {
+function formatPoints(locale: Locale, p: Points): string {
+  const [essence, budget, requirements] = LABELS[locale];
   return [
-    `• Būtība: ${s.butiba.trim()}`,
-    `• Budžets un termiņi: ${s.budzets_un_termini.trim()}`,
-    `• Prasības pretendentam: ${s.prasibas.trim()}`,
+    `• ${essence}: ${formatAmounts(p.essence.trim())}`,
+    `• ${budget}: ${formatAmounts(p.budget.trim())}`,
+    `• ${requirements}: ${formatAmounts(p.requirements.trim())}`,
   ].join("\n");
+}
+
+function toAiSummary(s: Summary): AiSummary {
+  return { lv: formatPoints("lv", s.lv), ru: formatPoints("ru", s.ru), en: formatPoints("en", s.en) };
 }
 
 /** Текст страницы закупки (все разделы уже есть в HTML, просто свёрнуты). */
@@ -92,7 +143,7 @@ async function fetchTenderPageText(browser: Browser, url: string): Promise<strin
   }
 }
 
-async function summarize(client: Anthropic, tender: Tender, pageText: string): Promise<string> {
+async function summarize(client: Anthropic, tender: Tender, pageText: string): Promise<AiSummary> {
   const messages: Anthropic.MessageParam[] = [
     {
       role: "user",
@@ -105,11 +156,13 @@ ${pageText || "(lapas teksts nav pieejams)"}`,
     },
   ];
 
-  // Первая попытка + максимум один повтор, если какой-то пункт длиннее лимита
+  // Первая попытка + максимум один повтор, если какой-то пункт длиннее лимита.
+  // messages.parse + zodOutputFormat: API гарантирует чистый JSON по схеме (без markdown),
+  // SDK делает JSON.parse и проверяет результат через Zod → parsed_output.
   for (let attempt = 1; attempt <= 2; attempt++) {
     const response = await client.messages.parse({
       model: MODEL,
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: SYSTEM_PROMPT,
       output_config: {
         effort: "low",
@@ -125,17 +178,19 @@ ${pageText || "(lapas teksts nav pieejams)"}`,
       throw new Error(`No structured output (stop_reason: ${response.stop_reason})`);
     }
 
-    const long = tooLong(response.parsed_output);
-    if (long.length === 0 || attempt === 2) {
-      if (long.length > 0) console.warn(`  ! still long after retry: ${long.join(", ")}`);
-      return formatSummary(response.parsed_output);
+    const problems = findProblems(response.parsed_output);
+    if (problems.length === 0 || attempt === 2) {
+      if (problems.length > 0) console.warn(`  ! still has problems after retry:\n    ${problems.join("\n    ")}`);
+      return toAiSummary(response.parsed_output);
     }
 
     messages.push(
       { role: "assistant", content: response.content },
       {
         role: "user",
-        content: `Pārāk gari punkti: ${long.join(", ")}. Saīsini katru punktu līdz 1–2 īsiem teikumiem (≤ ${MAX_POINT_CHARS} rakstzīmes), saglabājot summas un termiņus.`,
+        content: `Fix these problems and return the full JSON again:
+- ${problems.join("\n- ")}
+Each point must stay 1–2 short sentences (lv/en ≤ ${MAX_POINT_CHARS.lv}, ru ≤ ${MAX_POINT_CHARS.ru} characters) and keep all amounts and deadlines.`,
       },
     );
   }
@@ -176,7 +231,8 @@ async function main() {
         if (updateError) throw new Error(`Supabase update failed: ${updateError.message}`);
 
         ok++;
-        console.log(`\n✓ [${tender.external_id}] ${tender.title}\n${summary}`);
+        console.log(`\n✓ [${tender.external_id}] ${tender.title}`);
+        for (const locale of LOCALES) console.log(`  [${locale}]\n${summary[locale]}`);
       } catch (err) {
         failed++;
         if (err instanceof Anthropic.AuthenticationError) throw err; // неверный ключ — дальше нет смысла

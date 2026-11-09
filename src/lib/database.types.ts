@@ -1,6 +1,17 @@
 // Типы схемы БД. Позже можно генерировать автоматически:
 //   npx supabase gen types typescript --project-id <id> > src/lib/database.types.ts
 
+/** Поддерживаемые языки интерфейса и выжимок. */
+export const LOCALES = ["lv", "ru", "en"] as const;
+export type Locale = (typeof LOCALES)[number];
+
+/**
+ * AI-выжимка тендера (колонка ai_summary, jsonb).
+ * Каждое значение — 3 пункта, разделённых "\n":
+ * "• Būtība: …\n• Budžets un termiņi: …\n• Prasības pretendentam: …"
+ */
+export type AiSummary = Record<Locale, string>;
+
 export type Tender = {
   id: string;
   external_id: string;
@@ -9,7 +20,7 @@ export type Tender = {
   deadline: string | null;
   url: string;
   description: string | null;
-  ai_summary: string | null;
+  ai_summary: AiSummary | null;
   created_at: string;
 };
 
