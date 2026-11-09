@@ -5,12 +5,16 @@
 export const LOCALES = ["lv", "ru", "en"] as const;
 export type Locale = (typeof LOCALES)[number];
 
-/**
- * AI-выжимка тендера (колонка ai_summary, jsonb).
- * Каждое значение — 3 пункта, разделённых "\n":
- * "• Būtība: …\n• Budžets un termiņi: …\n• Prasības pretendentam: …"
- */
-export type AiSummary = Record<Locale, string>;
+/** Локализованная версия тендера для одного языка. */
+export type LocalizedTender = {
+  /** Название закупки: в lv — оригинал из EIS, в ru/en — перевод. */
+  title: string;
+  /** 3 пункта, разделённых "\n": "• Būtība: …\n• Budžets un termiņi: …\n• Prasības pretendentam: …" */
+  summary: string;
+};
+
+/** AI-выжимка тендера (колонка ai_summary, jsonb): {"lv": {...}, "ru": {...}, "en": {...}}. */
+export type AiSummary = Record<Locale, LocalizedTender>;
 
 export type Tender = {
   id: string;

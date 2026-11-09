@@ -15,8 +15,11 @@ function cleanCustomer(name: string): string {
 
 export function TenderCard({ tender }: { tender: TenderListItem }) {
   const { locale, t } = useLocale();
-  const summary = tender.ai_summary?.[locale];
-  const lines = summary ? parseSummaryLines(summary) : [];
+  const localized = tender.ai_summary?.[locale];
+  // Заголовок — из AI-JSON на выбранном языке; пока выжимки нет — оригинал из EIS
+  const title = localized?.title ?? tender.title;
+  const isTranslated = title !== tender.title;
+  const lines = localized ? parseSummaryLines(localized.summary) : [];
 
   return (
     <Card className="h-full">
@@ -31,7 +34,16 @@ export function TenderCard({ tender }: { tender: TenderListItem }) {
             #{tender.external_id}
           </Badge>
         </div>
-        <CardTitle className="text-base leading-snug sm:text-lg">{tender.title}</CardTitle>
+        <CardTitle className="text-base leading-snug sm:text-lg" lang={isTranslated ? locale : "lv"}>
+          {title}
+        </CardTitle>
+        {isTranslated && (
+          // официальное название на латышском — по нему закупку ищут в EIS и в документах
+          <p className="text-xs leading-snug text-muted-foreground" lang="lv">
+            <span className="sr-only">{t.originalTitle}: </span>
+            {tender.title}
+          </p>
+        )}
         {tender.customer_name && (
           <CardDescription className="flex items-start gap-1.5">
             <Building2 className="mt-0.5 size-3.5 shrink-0" aria-hidden />

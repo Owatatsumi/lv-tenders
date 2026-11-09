@@ -1,8 +1,10 @@
 /**
  * AI-выжимка тендеров: берёт из `tenders` записи с ai_summary IS NULL,
  * открывает страницу закупки на eis.gov.lv, отправляет её текст в Claude
- * и сохраняет выжимку из 3 пунктов на трёх языках в ai_summary (jsonb):
- *   {"lv": "• Būtība: …\n• …", "ru": "• Суть: …\n• …", "en": "• Summary: …\n• …"}
+ * и сохраняет заголовок + выжимку из 3 пунктов на трёх языках в ai_summary (jsonb):
+ *   {"lv": {"title": "<оригинал из EIS>", "summary": "• Būtība: …\n• …"},
+ *    "ru": {"title": "<перевод>",          "summary": "• Суть: …\n• …"},
+ *    "en": {"title": "<translation>",      "summary": "• Summary: …\n• …"}}
  *
  * Запуск: npm run summarize
  * Требует в .env.local: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY
@@ -43,16 +45,38 @@ const PointsSchema = z.object({
 });
 type Points = z.infer<typeof PointsSchema>;
 
-/** Ответ модели: строго JSON-объект с тремя языками (гарантируется structured outputs). */
-const SummarySchema = z.object({ lv: PointsSchema, ru: PointsSchema, en: PointsSchema });
+const TranslatedSchema = PointsSchema.extend({
+  title: z.string().describe("The procurement title translated into this language."),
+});
+
+/**
+ * Ответ модели: строго JSON-объект с тремя языками (гарантируется structured outputs).
+ * Латышский заголовок модель не пишет — это оригинал из EIS, его подставляет код без изменений.
+ */
+const SummarySchema = z.object({ lv: PointsSchema, ru: TranslatedSchema, en: TranslatedSchema });
 type Summary = z.infer<typeof SummarySchema>;
 
 const SYSTEM_PROMPT = `You help small businesses in Latvia follow public procurements.
 From the procurement data, write a very short summary in THREE languages: Latvian (lv), Russian (ru), English (en).
 Each language has the same three points with the same facts:
 1) essence, 2) budget and deadlines, 3) key requirements for bidders.
+For ru and en, also translate the procurement title ("Nosaukums").
 
 Output: only a JSON object {"lv": {...}, "ru": {...}, "en": {...}} matching the schema — no markdown, no code fences, no extra text.
+
+Title translation rules (ru, en) — the title MUST be translated, never copied:
+- Translate every ordinary word of the official title into Russian / English. Never leave Latvian common words
+  (e.g. "piegāde", "iegāde", "uzturēšana", "aprīkojums", "skaitītāju") untranslated.
+- Only proper names keep their Latin spelling: organizations, companies, places, brands, acronyms
+  (e.g. Ropažu novads, LBTU, "RĒZEKNES SLIMNĪCA"). Everything around them is translated.
+- Translate the full title accurately; do not shorten it, summarize it or add information. Keep numbers, codes and years.
+- Never return an empty title. No trailing period.
+Examples:
+- "Ropažu novada, Ropažu pagasta autoceļu un ielu ikdienas uzturēšana 2026/2027 gada ziemas periodā"
+  → ru "Ежедневное содержание автодорог и улиц Ropažu pagasts (Ropažu novads) в зимний период 2026/2027"
+  → en "Daily maintenance of roads and streets in Ropažu parish (Ropažu municipality) during the 2026/2027 winter period"
+- "Dronu laboratorijas un datorklases mēbeļu iegāde projekta S567 ietvaros"
+  → ru "Закупка мебели для лаборатории дронов и компьютерного класса в рамках проекта S567"
 
 Strict length rules:
 - Each point: AT MOST 1–2 short sentences (≤ ${MAX_POINT_CHARS.lv} characters; Russian ≤ ${MAX_POINT_CHARS.ru}).
@@ -78,19 +102,58 @@ Content rules:
 const MIXED_SCRIPT_WORD = /[\p{Script=Latin}][\p{Script=Cyrillic}]|[\p{Script=Cyrillic}][\p{Script=Latin}]/u;
 
 /** Проблемы, из-за которых стоит один раз переспросить модель. */
-function findProblems(s: Summary): string[] {
-  return LOCALES.flatMap((locale) =>
+/** Латышские буквы с диакритикой — в обычных словах перевода их быть не должно. */
+const LATVIAN_DIACRITIC = /[āčēģīķļņšūž]/i;
+
+/**
+ * Проверки перевода заголовка (ru/en): не пустой, не копия оригинала, без непереведённых
+ * латышских слов. Имена собственные пишутся с заглавной, а названия в кавычках
+ * («NVO un brīvprātīgo godināšana») — это имена мероприятий, поэтому их не проверяем.
+ */
+function titleProblems(locale: "ru" | "en", title: string, original: string): string[] {
+  const t = title.trim();
+  if (!t) return [`${locale}.title: empty — translate the title`];
+  const norm = (x: string) => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  if (norm(t) === norm(original)) return [`${locale}.title: copied from the Latvian original — translate it`];
+
+  const problems: string[] = [];
+  const unquoted = t.replace(/[«„“"][^«»„“”"]*[»”"]/g, " ");
+  const leftovers = unquoted
+    .split(/[\s,.;:()/]+/)
+    .filter((w) => w.length >= 3 && /^\p{Ll}/u.test(w) && LATVIAN_DIACRITIC.test(w));
+  if (leftovers.length > 0) {
+    problems.push(`${locale}.title: untranslated Latvian words ${leftovers.join(", ")} — translate them`);
+  }
+  if (locale === "ru") {
+    const letters = unquoted.match(/\p{L}/gu) ?? [];
+    const cyrillic = unquoted.match(/\p{Script=Cyrillic}/gu) ?? [];
+    if (letters.length > 0 && cyrillic.length / letters.length < 0.4) {
+      problems.push("ru.title: mostly not in Russian — translate everything except proper names");
+    }
+  }
+  return problems;
+}
+
+function findProblems(s: Summary, originalTitle: string): string[] {
+  const titles = [
+    ...titleProblems("ru", s.ru.title, originalTitle),
+    ...titleProblems("en", s.en.title, originalTitle),
+  ];
+  return titles.concat(LOCALES.flatMap((locale) =>
     Object.entries(s[locale]).flatMap(([key, text]) => {
       const problems: string[] = [];
       const len = text.trim().length;
-      if (len > MAX_POINT_CHARS[locale]) problems.push(`${locale}.${key}: too long (${len} chars)`);
+      // лимит длины — только для пунктов выжимки; заголовок переводится полностью
+      if (key !== "title" && len > MAX_POINT_CHARS[locale]) {
+        problems.push(`${locale}.${key}: too long (${len} chars)`);
+      }
       const mixed = text.split(/[\s,.;:()«»"„“]+/).filter((w) => MIXED_SCRIPT_WORD.test(w));
       if (mixed.length > 0) {
         problems.push(`${locale}.${key}: mixed Latin/Cyrillic in ${mixed.join(", ")} — copy names exactly from the source`);
       }
       return problems;
     }),
-  );
+  ));
 }
 
 /** «175000.00 EUR» → «175 000 EUR», «7965,50 EUR» → «7 965,50 EUR» (детерминированно, не полагаемся на модель). */
@@ -98,7 +161,9 @@ function formatAmounts(text: string): string {
   return text.replace(/\b(\d{4,})(?:[.,](\d{2}))?(\s?)(EUR|€)/g, (_, int: string, cents: string | undefined, _sp, cur: string) => {
     const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
     return `${grouped}${cents && cents !== "00" ? `,${cents}` : ""} ${cur}`;
-  });
+  })
+    // модель иногда сама группирует разряды, но оставляет копейки: «16 000,00 EUR» → «16 000 EUR»
+    .replace(/(\d)[.,]00(\s?)(EUR|€)/g, "$1 $3");
 }
 
 function env(name: string): string {
@@ -116,8 +181,20 @@ function formatPoints(locale: Locale, p: Points): string {
   ].join("\n");
 }
 
-function toAiSummary(s: Summary): AiSummary {
-  return { lv: formatPoints("lv", s.lv), ru: formatPoints("ru", s.ru), en: formatPoints("en", s.en) };
+/**
+ * Убираем точку в конце переведённого заголовка. Кавычки не трогаем: в названии
+ * может быть закрывающая кавычка имени мероприятия («NVO un brīvprātīgo godināšana»).
+ */
+function cleanTitle(title: string): string {
+  return title.trim().replace(/\.$/, "").trim();
+}
+
+function toAiSummary(s: Summary, originalTitle: string): AiSummary {
+  return {
+    lv: { title: originalTitle, summary: formatPoints("lv", s.lv) },
+    ru: { title: cleanTitle(s.ru.title), summary: formatPoints("ru", s.ru) },
+    en: { title: cleanTitle(s.en.title), summary: formatPoints("en", s.en) },
+  };
 }
 
 /** Текст страницы закупки (все разделы уже есть в HTML, просто свёрнуты). */
@@ -178,10 +255,10 @@ ${pageText || "(lapas teksts nav pieejams)"}`,
       throw new Error(`No structured output (stop_reason: ${response.stop_reason})`);
     }
 
-    const problems = findProblems(response.parsed_output);
+    const problems = findProblems(response.parsed_output, tender.title);
     if (problems.length === 0 || attempt === 2) {
       if (problems.length > 0) console.warn(`  ! still has problems after retry:\n    ${problems.join("\n    ")}`);
-      return toAiSummary(response.parsed_output);
+      return toAiSummary(response.parsed_output, tender.title);
     }
 
     messages.push(
@@ -232,7 +309,9 @@ async function main() {
 
         ok++;
         console.log(`\n✓ [${tender.external_id}] ${tender.title}`);
-        for (const locale of LOCALES) console.log(`  [${locale}]\n${summary[locale]}`);
+        for (const locale of LOCALES) {
+          console.log(`  [${locale}] ${summary[locale].title}\n${summary[locale].summary}`);
+        }
       } catch (err) {
         failed++;
         if (err instanceof Anthropic.AuthenticationError) throw err; // неверный ключ — дальше нет смысла

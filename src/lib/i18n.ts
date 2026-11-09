@@ -4,7 +4,7 @@ export const DEFAULT_LOCALE: Locale = "lv";
 
 export const LOCALE_LABELS: Record<Locale, string> = { lv: "LV", ru: "RU", en: "EN" };
 
-/** Тексты интерфейса. Данные тендеров (название, заказчик) остаются на латышском — как в EIS. */
+/** Тексты интерфейса. Заказчик остаётся на латышском (как в EIS), название переводится AI. */
 export const dictionary = {
   lv: {
     appName: "LV Tenders",
@@ -12,6 +12,7 @@ export const dictionary = {
     latest: "Jaunākie iepirkumi",
     count: (n: number) => `${n} iepirkumi`,
     customer: "Pasūtītājs",
+    originalTitle: "Oriģinālais nosaukums",
     deadline: "Iesniegšanas termiņš",
     noDeadline: "Termiņš nav norādīts",
     summaryPending: "AI kopsavilkums vēl tiek gatavots.",
@@ -26,6 +27,7 @@ export const dictionary = {
     latest: "Последние закупки",
     count: (n: number) => `Закупок: ${n}`,
     customer: "Заказчик",
+    originalTitle: "Оригинальное название",
     deadline: "Срок подачи",
     noDeadline: "Срок не указан",
     summaryPending: "AI-выжимка ещё готовится.",
@@ -40,6 +42,7 @@ export const dictionary = {
     latest: "Latest tenders",
     count: (n: number) => `${n} tenders`,
     customer: "Contracting authority",
+    originalTitle: "Original title",
     deadline: "Submission deadline",
     noDeadline: "No deadline specified",
     summaryPending: "AI summary is being prepared.",
