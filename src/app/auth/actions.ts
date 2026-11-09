@@ -16,7 +16,8 @@ export type AuthErrorCode =
 
 export type AuthState =
   | { status: "idle" }
-  | { status: "error"; code: AuthErrorCode }
+  /** email возвращаем, чтобы форма не стирала введённый адрес после ошибки */
+  | { status: "error"; code: AuthErrorCode; email: string }
   /** Шаг ввода одноразового кода из письма (регистрация или вход в неподтверждённый аккаунт). */
   | { status: "verify"; email: string; reason: "signup" | "unconfirmed" };
 
@@ -55,9 +56,14 @@ function mapSupabaseError(code: string | undefined, status: number | undefined):
   return status === 429 ? "rate_limited" : "unknown";
 }
 
+/** Настоящую ошибку Supabase пишем в лог сервера: пользователю показываем понятный текст, а разработчику нужна причина. */
+function logAuthError(action: string, error: { code?: string; status?: number; message: string }) {
+  console.warn(`[auth:${action}] ${error.status ?? "?"} ${error.code ?? "no_code"}: ${error.message}`);
+}
+
 export async function signIn(_prev: AuthState, formData: FormData): Promise<AuthState> {
   const { email, password } = readCredentials(formData);
-  if (!email || !password) return { status: "error", code: "missing_fields" };
+  if (!email || !password) return { status: "error", code: "missing_fields", email };
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -66,28 +72,35 @@ export async function signIn(_prev: AuthState, formData: FormData): Promise<Auth
     // Аккаунт создан, но email не подтверждён — шлём свежий код и переходим к его вводу.
     // Ошибку отправки (например, лимит «раз в минуту») не показываем: пользователь может
     // ввести код из предыдущего письма или нажать «Отправить ещё раз».
-    await supabase.auth.resend({ type: "signup", email });
+    const { error: resendError } = await supabase.auth.resend({ type: "signup", email });
+    if (resendError) logAuthError("resend", resendError);
     return { status: "verify", email, reason: "unconfirmed" };
   }
-  if (error) return { status: "error", code: mapSupabaseError(error.code, error.status) };
+  if (error) {
+    logAuthError("signIn", error);
+    return { status: "error", code: mapSupabaseError(error.code, error.status), email };
+  }
 
   redirect("/");
 }
 
 export async function signUp(_prev: AuthState, formData: FormData): Promise<AuthState> {
   const { email, password } = readCredentials(formData);
-  if (!email || !password) return { status: "error", code: "missing_fields" };
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { status: "error", code: "invalid_email" };
-  if (password.length < MIN_PASSWORD_LENGTH) return { status: "error", code: "weak_password" };
+  if (!email || !password) return { status: "error", code: "missing_fields", email };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { status: "error", code: "invalid_email", email };
+  if (password.length < MIN_PASSWORD_LENGTH) return { status: "error", code: "weak_password", email };
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({ email, password });
-  if (error) return { status: "error", code: mapSupabaseError(error.code, error.status) };
+  if (error) {
+    logAuthError("signUp", error);
+    return { status: "error", code: mapSupabaseError(error.code, error.status), email };
+  }
 
   // При включённом подтверждении email Supabase не сообщает, что адрес занят (защита от перебора),
   // а возвращает пользователя без identities.
   if (data.user && data.user.identities?.length === 0) {
-    return { status: "error", code: "user_already_exists" };
+    return { status: "error", code: "user_already_exists", email };
   }
 
   // Подтверждение email выключено в проекте — сессия уже есть, сразу на главную.
@@ -104,6 +117,7 @@ export async function verifyCode(_prev: VerifyState, formData: FormData): Promis
 
   const supabase = await createClient();
   const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+  if (error) logAuthError("verifyOtp", error);
   if (error) return { status: "error", code: mapSupabaseError(error.code, error.status) };
 
   redirect("/");
@@ -116,6 +130,7 @@ export async function resendCode(_prev: VerifyState, formData: FormData): Promis
 
   const supabase = await createClient();
   const { error } = await supabase.auth.resend({ type: "signup", email });
+  if (error) logAuthError("resend", error);
   if (error) return { status: "error", code: mapSupabaseError(error.code, error.status) };
   return { status: "resent" };
 }

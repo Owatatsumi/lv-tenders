@@ -30,6 +30,13 @@ function AuthFormInner({ mode, onReset }: { mode: "login" | "signup"; onReset: (
   const errorText =
     state.status === "error" ? a.errors[state.code] : linkError ? a.errors.confirm : null;
 
+  // Подсвечиваем только поле, в котором ошибка. Лимит запросов или сбой сервера — не вина полей.
+  const code = state.status === "error" ? state.code : null;
+  const typedEmail = state.status === "error" ? state.email : "";
+  const emailInvalid =
+    code === "invalid_email" || code === "user_already_exists" || (code === "missing_fields" && !typedEmail);
+  const passwordInvalid = code === "weak_password" || code === "invalid_credentials" || code === "missing_fields";
+
   return (
     <Card className="w-full max-w-sm bg-card/70 backdrop-blur-md">
       <CardHeader>
@@ -63,7 +70,9 @@ function AuthFormInner({ mode, onReset }: { mode: "login" | "signup"; onReset: (
                 type="email"
                 autoComplete="email"
                 required
-                aria-invalid={state.status === "error" && state.code !== "weak_password" ? true : undefined}
+                // React 19 очищает форму после action — возвращаем введённый email
+                defaultValue={state.status === "error" ? state.email : undefined}
+                aria-invalid={emailInvalid || undefined}
               />
             </div>
             <div className="space-y-2">
@@ -76,7 +85,7 @@ function AuthFormInner({ mode, onReset }: { mode: "login" | "signup"; onReset: (
                 minLength={mode === "signup" ? 8 : undefined}
                 required
                 aria-describedby={mode === "signup" ? "password-hint" : undefined}
-                aria-invalid={state.status === "error" && state.code !== "missing_fields" ? true : undefined}
+                aria-invalid={passwordInvalid || undefined}
               />
               {mode === "signup" && (
                 <p id="password-hint" className="text-xs text-muted-foreground">
