@@ -56,6 +56,6 @@ function isGoneSession(error: { code?: string; status?: number }) {
 }
 
 export const config = {
-  // всё, кроме статики и картинок
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  // всё, кроме статики, картинок и cron-роутов (там нет пользовательской сессии)
+  matcher: ["/((?!_next/static|_next/image|api/cron|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };
