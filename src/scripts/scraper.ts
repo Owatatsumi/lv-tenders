@@ -22,7 +22,14 @@ import type { Database, TenderInsert } from "../lib/database.types";
 
 const BASE_URL = "https://www.eis.gov.lv";
 const LIST_URL = `${BASE_URL}/EKEIS/Supplier/`;
-const MAX_TENDERS = 10;
+/** Сколько тендеров брать со страницы списка (на ней 20). Можно переопределить: SCRAPE_LIMIT=20 npm run scrape */
+const DEFAULT_LIMIT = 10;
+const LIST_PAGE_SIZE = 20;
+
+function scrapeLimit(): number {
+  const n = Number(process.env.SCRAPE_LIMIT);
+  return Number.isInteger(n) && n > 0 ? Math.min(n, LIST_PAGE_SIZE) : DEFAULT_LIMIT;
+}
 const DELAY_BETWEEN_PAGES_MS = 500; // не нагружаем гос. портал
 
 type ListRow = {
@@ -111,7 +118,7 @@ async function scrapeList(page: Page): Promise<ListRow[]> {
       };
     })
     .filter((r): r is ListRow => r !== null)
-    .slice(0, MAX_TENDERS);
+    .slice(0, scrapeLimit());
 }
 
 /**
