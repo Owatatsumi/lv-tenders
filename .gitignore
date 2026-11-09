@@ -44,3 +44,6 @@ next-env.d.ts
 .idea/
 
 !.env.example
+
+# Claude Code local config (preview launch)
+.claude/
