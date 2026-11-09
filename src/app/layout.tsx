@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { BackgroundGlow } from "@/components/background-glow";
+import { LocaleProvider } from "@/components/locale-provider";
+import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
@@ -29,7 +32,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="scanlines min-h-full flex flex-col font-sans">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          {children}
+          {/* язык в layout — не сбрасывается при переходах между страницами */}
+          <LocaleProvider>
+            {/* overflow-clip, а не overflow-hidden: обрезает свечение (без горизонтального скролла),
+                но не создаёт область прокрутки — иначе перестанет работать sticky-шапка */}
+            <div className="relative isolate flex flex-1 flex-col overflow-clip">
+              <BackgroundGlow />
+              <SiteHeader />
+              {children}
+            </div>
+          </LocaleProvider>
         </ThemeProvider>
       </body>
     </html>

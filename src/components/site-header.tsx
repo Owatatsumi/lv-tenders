@@ -1,9 +1,11 @@
 "use client";
 
 import { FileSearch } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { LOCALES } from "@/lib/database.types";
 import { LOCALE_LABELS } from "@/lib/i18n";
+import { AuthStatus } from "./auth-status";
 import { useLocale } from "./locale-provider";
 import { Preferences } from "./preferences";
 
@@ -14,13 +16,13 @@ export function SiteHeader() {
     // Glassmorphism: полупрозрачный фон + размытие того, что под шапкой (свечение, текстура, карточки)
     <header className="sticky top-0 z-10 border-b bg-background/70 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
-        <div className="flex min-w-0 items-center gap-2">
+        <Link href="/" className="flex min-w-0 shrink-0 items-center gap-2 rounded-lg" aria-label={t.appName}>
           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_20px_-4px_var(--primary)]">
             <FileSearch className="size-4" aria-hidden />
           </span>
-          {/* на узких экранах оставляем только логотип, чтобы поместились переключатели */}
-          <span className="hidden truncate font-semibold tracking-tight min-[400px]:inline">{t.appName}</span>
-        </div>
+          {/* на узких экранах оставляем только логотип, чтобы поместились переключатели и вход */}
+          <span className="hidden truncate font-semibold tracking-tight sm:inline">{t.appName}</span>
+        </Link>
 
         <div className="flex shrink-0 items-center gap-2">
         <Preferences />
@@ -38,6 +40,7 @@ export function SiteHeader() {
             </Button>
           ))}
         </div>
+        <AuthStatus />
         </div>
       </div>
     </header>
