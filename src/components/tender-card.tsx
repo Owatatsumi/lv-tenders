@@ -22,7 +22,8 @@ export function TenderCard({ tender }: { tender: TenderListItem }) {
   const lines = localized ? parseSummaryLines(localized.summary) : [];
 
   return (
-    <Card className="h-full">
+    // Glassmorphism: полупрозрачная карточка размывает свечение и текстуру под собой
+    <Card className="h-full bg-card/70 backdrop-blur-md">
       <CardHeader className="gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={tender.deadline ? "orange" : "outline"} className="gap-1">

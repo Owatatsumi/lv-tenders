@@ -37,7 +37,7 @@ function TenderGridSkeleton() {
     <ul className={GRID} aria-busy="true">
       {Array.from({ length: 6 }, (_, i) => (
         <li key={i}>
-          <Card className="h-full">
+          <Card className="h-full bg-card/70 backdrop-blur-md">
             <CardHeader className="gap-3">
               <Skeleton className="h-5 w-32" />
               <Skeleton className="h-5 w-full" />
@@ -53,16 +53,32 @@ function TenderGridSkeleton() {
   );
 }
 
+/**
+ * Мягкое свечение в верхних углах: два размытых пятна под контентом.
+ * `isolate` у обёртки страницы держит z-[-10] над фоном body (с текстурой), но под контентом.
+ */
+function BackgroundGlow() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-[-10] h-[44rem] overflow-hidden">
+      <div className="absolute -top-48 -left-40 size-[34rem] rounded-full bg-primary/25 blur-[120px] dark:bg-primary/30" />
+      <div className="absolute -top-32 -right-48 size-[30rem] rounded-full bg-orange-accent/20 blur-[120px] dark:bg-orange-accent/25" />
+    </div>
+  );
+}
+
 export default function Home() {
   return (
     <LocaleProvider>
-      <SiteHeader />
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
-        <TenderListHeader />
-        <Suspense fallback={<TenderGridSkeleton />}>
-          <TenderGrid />
-        </Suspense>
-      </main>
+      <div className="relative isolate flex flex-1 flex-col">
+        <BackgroundGlow />
+        <SiteHeader />
+        <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
+          <TenderListHeader />
+          <Suspense fallback={<TenderGridSkeleton />}>
+            <TenderGrid />
+          </Suspense>
+        </main>
+      </div>
     </LocaleProvider>
   );
 }

@@ -20,6 +20,8 @@ export const dictionary = {
     empty: "Pagaidām nav neviena iepirkuma.",
     error: "Neizdevās ielādēt iepirkumus. Mēģiniet vēlāk.",
     language: "Valoda",
+    theme: "Tēma",
+    themes: { light: "Gaišā tēma", dark: "Tumšā tēma", system: "Sistēmas tēma" },
   },
   ru: {
     appName: "LV Tenders",
@@ -35,6 +37,8 @@ export const dictionary = {
     empty: "Пока нет ни одной закупки.",
     error: "Не удалось загрузить закупки. Попробуйте позже.",
     language: "Язык",
+    theme: "Тема",
+    themes: { light: "Светлая тема", dark: "Тёмная тема", system: "Как в системе" },
   },
   en: {
     appName: "LV Tenders",
@@ -50,8 +54,13 @@ export const dictionary = {
     empty: "No tenders yet.",
     error: "Could not load tenders. Please try again later.",
     language: "Language",
+    theme: "Theme",
+    themes: { light: "Light theme", dark: "Dark theme", system: "System theme" },
   },
-} satisfies Record<Locale, Record<string, string | ((n: number) => string)>>;
+} satisfies Record<
+  Locale,
+  Record<string, string | ((n: number) => string) | Record<"light" | "dark" | "system", string>>
+>;
 
 export type Dictionary = (typeof dictionary)[Locale];
 
