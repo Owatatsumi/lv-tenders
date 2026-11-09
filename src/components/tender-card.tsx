@@ -25,7 +25,7 @@ export function TenderCard({ tender }: { tender: TenderListItem }) {
     <Card className="h-full">
       <CardHeader className="gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={tender.deadline ? "secondary" : "outline"} className="gap-1">
+          <Badge variant={tender.deadline ? "orange" : "outline"} className="gap-1">
             <CalendarClock aria-hidden />
             <span className="sr-only">{t.deadline}: </span>
             {tender.deadline ? formatDeadline(tender.deadline) : t.noDeadline}
@@ -75,7 +75,7 @@ export function TenderCard({ tender }: { tender: TenderListItem }) {
           href={tender.url}
           target="_blank"
           rel="noopener noreferrer"
-          className={buttonVariants({ variant: "outline", size: "sm", className: "w-full sm:w-auto" })}
+          className={buttonVariants({ size: "sm", className: "w-full sm:w-auto" })}
         >
           {t.openInEis}
           <ExternalLink data-icon="inline-end" aria-hidden />
